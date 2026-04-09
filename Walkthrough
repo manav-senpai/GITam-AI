@@ -1,0 +1,71 @@
+# Hotspot AI — Walkthrough
+
+## What Was Built
+
+A **multi-agent Predictive Engineering Intelligence Platform** that connects to any public GitHub repo, analyzes its codebase health using 7 specialized AI agents, predicts which components will fail in the next 90 days, and generates a CEO-friendly business impact report.
+
+![Hotspot AI Landing Page](C:/Users/ahire/.gemini/antigravity/brain/e88e0d38-abb7-4b75-9860-5866c43c8d09/hotspot_ai_landing_page_1775772798593.png)
+
+## Architecture
+
+```mermaid
+graph TD
+    A[Frontend - React + Vite] -->|REST API| B[FastAPI Backend]
+    B --> C[Agent 1: Data Collector]
+    B --> D[Agent 2: Code Analyzer]
+    B --> E[Agent 3: Bug Analyzer]
+    B --> F[Agent 4: Health Scorer]
+    B --> G[Agent 5: Predictor]
+    B --> H[Agent 6: Report Generator]
+    B --> I[Agent 7: Email Sender]
+    C -->|GitHub API| J[GitHub Repository]
+    D -->|Groq/Ollama| K[LLM]
+    H -->|Groq/Ollama| K
+```
+
+## Key Files
+
+| Component | Files |
+|-----------|-------|
+| **Backend** | [main.py](file:///d:/DESKTOP/HOTSPOT-AI/backend/main.py), [agents/](file:///d:/DESKTOP/HOTSPOT-AI/backend/agents/) (7 agent files) |
+| **Frontend** | [App.jsx](file:///d:/DESKTOP/HOTSPOT-AI/frontend/src/App.jsx), pages: [Home](file:///d:/DESKTOP/HOTSPOT-AI/frontend/src/pages/Home.jsx), [Dashboard](file:///d:/DESKTOP/HOTSPOT-AI/frontend/src/pages/Dashboard.jsx), [CodeReview](file:///d:/DESKTOP/HOTSPOT-AI/frontend/src/pages/CodeReview.jsx), [Report](file:///d:/DESKTOP/HOTSPOT-AI/frontend/src/pages/Report.jsx) |
+| **Styling** | [index.css](file:///d:/DESKTOP/HOTSPOT-AI/frontend/src/index.css) — full design system (dark theme, glassmorphism, animations) |
+
+## Features
+
+1. **🏠 Home Page** — Enter any GitHub repo URL, click Analyze
+2. **📊 Dashboard** — Health scores, commit charts, bug stats, risk forecast 
+3. **🔍 Code Review** — Side-by-side diff viewer + AI-powered code analysis with explanations
+4. **📋 CEO Report** — Business-impact report in plain English + email to CEO button
+5. **⏳ Live Progress** — Real-time SSE streaming shows which agent is working
+
+## How to Run
+
+### Backend
+```bash
+cd d:\DESKTOP\HOTSPOT-AI\backend
+py -3.14 main.py
+# Runs on http://localhost:8000
+```
+
+### Frontend
+```bash
+cd d:\DESKTOP\HOTSPOT-AI\frontend
+npx vite --host
+# Runs on http://localhost:5173
+```
+
+### Demo Flow
+1. Open http://localhost:5173
+2. Enter `https://github.com/pallets/flask` (pre-filled)
+3. Click **🚀 Analyze** — watch the multi-agent progress overlay
+4. Explore **Dashboard** → **Code Review** → **CEO Report**
+
+## Verification
+
+- ✅ Home page loads with correct UI (screenshot above)
+- ✅ Backend API running on port 8000
+- ✅ Frontend dev server running on port 5173
+- ✅ All 7 agents implemented with Groq (primary) + Ollama (fallback)
+- ✅ SSE streaming for real-time progress updates
+- ✅ Email to CEO functionality via Gmail SMTP
