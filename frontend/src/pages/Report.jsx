@@ -25,32 +25,20 @@ export default function Report({ data, apiBase }) {
         setTimeout(() => setToast(null), 4000)
     }
 
-    const sendEmail = async () => {
+    const sendEmail = () => {
         if (!ceoEmail.trim() || !ceoEmail.includes('@')) {
             showToast('Please enter a valid email address', 'error')
             return
         }
 
-        setSending(true)
-        try {
-            const res = await fetch(`${apiBase}/api/send-email`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    to_email: ceoEmail,
-                    repo_url: data.repoUrl,
-                }),
-            })
-            const result = await res.json()
-            if (res.ok) {
-                showToast(`Report sent to ${ceoEmail}!`, 'success')
-            } else {
-                showToast(result.detail || 'Failed to send email', 'error')
-            }
-        } catch (err) {
-            showToast(`Error: ${err.message}`, 'error')
-        }
-        setSending(false)
+        const reportText = report.report_text || 'No report generated.'
+        const repoName = data.repo || 'Repository'
+        const subject = encodeURIComponent(`[GITam AI] Engineering Health Report — ${repoName}`)
+        const body = encodeURIComponent(reportText)
+
+        // Open default email client with report pre-filled
+        window.open(`mailto:${ceoEmail}?subject=${subject}&body=${body}`, '_blank')
+        showToast(`Email client opened for ${ceoEmail}!`, 'success')
     }
 
     const handlePrint = () => {

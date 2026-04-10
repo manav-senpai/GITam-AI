@@ -138,7 +138,7 @@ function App() {
         <NavLink to="/" className="navbar-brand" style={{ textDecoration: 'none' }}>
           <div className="navbar-logo">G</div>
           <div>
-            <div className="navbar-title">Gitam AI</div>
+            <div className="navbar-title">GITam AI</div>
             <div className="navbar-subtitle">Predictive Engineering Intelligence</div>
           </div>
         </NavLink>

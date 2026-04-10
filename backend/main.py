@@ -1,9 +1,12 @@
 """
-Hotspot AI - Predictive Engineering Intelligence Platform
+GITam AI - Predictive Engineering Intelligence Platform
 Main FastAPI Server — orchestrates multi-agent pipeline.
 """
 
+import os
 import asyncio
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -75,7 +78,7 @@ async def analysis_generator(repo_owner: str, repo_name: str, days: int):
         # Step 1: Data Collection
         yield f"data: {json.dumps({'step': 1, 'total': 6, 'agent': 'Data Collector', 'status': 'Connecting to GitHub and collecting repository data...', 'progress': 10})}\n\n"
 
-        collector = DataCollectorAgent(repo_owner, repo_name)
+        collector = DataCollectorAgent(repo_owner, repo_name, token=os.getenv("GITHUB_TOKEN"))
         raw_data = await collector.collect_all(days=days)
 
         commit_count = len(raw_data.get('commits', []))
@@ -200,7 +203,7 @@ async def get_code_review(owner: str, repo: str, req: CodeReviewRequest):
     diffs = code_analyzer.get_file_diffs(data["raw_data"]["detailed_commits"], req.filename)
 
     # Get current file content
-    collector = DataCollectorAgent(owner, repo)
+    collector = DataCollectorAgent(owner, repo, token=os.getenv("GITHUB_TOKEN"))
     file_content = await collector.get_file_content(req.filename)
 
     # Get AI review

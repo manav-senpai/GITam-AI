@@ -117,6 +117,9 @@ class DataCollectorAgent:
                     if "pull_request" in issue:
                         continue  # skip PRs
                     labels = [l["name"] for l in issue.get("labels", [])]
+                    title_lower = issue.get("title", "").lower()
+                    body_lower = (issue.get("body") or "").lower()
+                    text_combined = title_lower + " " + body_lower + " " + " ".join(labels).lower()
                     all_issues.append({
                         "number": issue["number"],
                         "title": issue["title"],
@@ -126,8 +129,10 @@ class DataCollectorAgent:
                         "closed_at": issue.get("closed_at"),
                         "body": (issue.get("body") or "")[:500],
                         "is_bug": any(
-                            kw in " ".join(labels).lower()
-                            for kw in ["bug", "defect", "error", "fix", "crash"]
+                            kw in text_combined
+                            for kw in ["bug", "defect", "error", "fix", "crash", "broken",
+                                        "fail", "issue", "wrong", "not work", "doesn't work",
+                                        "regression", "unexpected", "fault", "problem"]
                         ),
                     })
                 if len(issues) < per_page:

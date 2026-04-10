@@ -1,14 +1,23 @@
 """
 Predictor Agent - Predicts which components are likely to fail in the next 90 days.
-Uses trend analysis on health metrics.
+Uses COCOMO II model for cost estimation + decay rate trend analysis.
 """
 
+import math
 from datetime import datetime
 from collections import defaultdict
 
 
 class PredictorAgent:
     """Agent that predicts future component failures based on trends."""
+
+    # COCOMO II coefficients (Semi-Detached mode — typical for most projects)
+    COCOMO_A = 3.0        # Effort multiplier
+    COCOMO_B = 1.12       # Scale exponent
+    COCOMO_C = 2.5        # Schedule multiplier
+    COCOMO_D = 0.35       # Schedule exponent
+    DEV_HOURLY_RATE = 75  # Average developer rate ($/hr)
+    HOURS_PER_PM = 152    # Working hours per person-month
 
     def predict(
         self, health_scores: dict, code_analysis: dict, bug_analysis: dict
@@ -32,6 +41,9 @@ class PredictorAgent:
         high_risk_60d = [p for p in predictions if p["risk_level_60d"] == "high"]
         high_risk_90d = [p for p in predictions if p["risk_level_90d"] == "high"]
 
+        # Aggregate COCOMO cost breakdown
+        cocomo_breakdown = self._aggregate_cocomo(predictions)
+
         return {
             "predictions": predictions,
             "summary": {
@@ -42,6 +54,65 @@ class PredictorAgent:
                 "top_risk_component": predictions[0]["filename"] if predictions else None,
             },
             "timeline": self._generate_timeline(predictions),
+            "cocomo_breakdown": cocomo_breakdown,
+        }
+
+    def _estimate_kloc(self, file_score: dict) -> float:
+        """Estimate KLOC (thousands of lines of code) from change metrics."""
+        # Rough estimation: additions + deletions gives volume of code touched
+        additions = file_score.get("additions", 0)
+        deletions = file_score.get("deletions", 0)
+        total_lines = additions + deletions
+        # Assume changed code is ~30% of total file size for hotspot files
+        estimated_file_size = max(total_lines * 3.3, 100)
+        return estimated_file_size / 1000.0  # Convert to KLOC
+
+    def _cocomo_effort(self, kloc: float, complexity: str = "medium") -> dict:
+        """
+        COCOMO II effort/cost estimation.
+        
+        Formula: Effort (PM) = A × (KLOC)^B × EAF
+        Cost = Effort × Hours_per_PM × Hourly_Rate
+        Schedule = C × (Effort)^D
+        
+        EAF (Effort Adjustment Factor) based on complexity:
+          - low:    0.75 (simple, well-understood code)
+          - medium: 1.00 (typical complexity)
+          - high:   1.40 (complex, poorly documented)
+          - critical: 1.80 (very complex, high coupling)
+        """
+        eaf_map = {"low": 0.75, "medium": 1.00, "high": 1.40, "critical": 1.80}
+        eaf = eaf_map.get(complexity, 1.0)
+
+        if kloc <= 0:
+            kloc = 0.1
+
+        effort_pm = self.COCOMO_A * math.pow(kloc, self.COCOMO_B) * eaf
+        schedule_months = self.COCOMO_C * math.pow(effort_pm, self.COCOMO_D) if effort_pm > 0 else 0
+        cost = effort_pm * self.HOURS_PER_PM * self.DEV_HOURLY_RATE
+
+        # Break down cost components
+        development_cost = cost * 0.40
+        testing_cost = cost * 0.25
+        review_cost = cost * 0.15
+        deployment_cost = cost * 0.10
+        overhead_cost = cost * 0.10
+
+        return {
+            "kloc": round(kloc, 3),
+            "effort_person_months": round(effort_pm, 2),
+            "schedule_months": round(schedule_months, 2),
+            "total_cost": round(cost, 0),
+            "effort_hours": round(effort_pm * self.HOURS_PER_PM, 1),
+            "complexity": complexity,
+            "eaf": eaf,
+            "breakdown": {
+                "development": round(development_cost, 0),
+                "testing": round(testing_cost, 0),
+                "code_review": round(review_cost, 0),
+                "deployment": round(deployment_cost, 0),
+                "overhead": round(overhead_cost, 0),
+            },
         }
 
     def _predict_file_risk(
@@ -80,8 +151,19 @@ class PredictorAgent:
         risk_60d = self._score_to_risk(score_60d)
         risk_90d = self._score_to_risk(score_90d)
 
-        # Estimated impact
-        impact = self._estimate_impact(file_score, decay_rate)
+        # Determine complexity from risk factors
+        if current_health < 30:
+            complexity = "critical"
+        elif current_health < 50:
+            complexity = "high"
+        elif current_health < 70:
+            complexity = "medium"
+        else:
+            complexity = "low"
+
+        # COCOMO-based cost estimation
+        kloc = self._estimate_kloc(file_score)
+        cocomo = self._cocomo_effort(kloc, complexity)
 
         return {
             "filename": file_score["filename"],
@@ -95,7 +177,12 @@ class PredictorAgent:
             "risk_level_90d": risk_90d,
             "decay_rate": round(decay_rate, 2),
             "risk_factors": risk_factors,
-            "estimated_impact": impact,
+            "estimated_impact": {
+                "estimated_debug_hours_90d": cocomo["effort_hours"],
+                "estimated_cost_90d": cocomo["total_cost"],
+                "confidence": "high" if decay_rate > 3 else "medium" if decay_rate > 1.5 else "low",
+            },
+            "cocomo": cocomo,
             "recommendation": self._generate_recommendation(
                 file_score, decay_rate, risk_90d
             ),
@@ -108,19 +195,32 @@ class PredictorAgent:
             return "medium"
         return "high"
 
-    def _estimate_impact(self, file_score: dict, decay_rate: float) -> dict:
-        """Estimate business impact of not addressing this file."""
-        # Simple heuristic-based estimation
-        base_hours = file_score.get("change_count", 1) * 2  # hours spent changing
-        risk_multiplier = 1 + (decay_rate * 0.5)
+    def _aggregate_cocomo(self, predictions: list) -> dict:
+        """Aggregate COCOMO metrics across all components."""
+        total_cost = sum(p.get("cocomo", {}).get("total_cost", 0) for p in predictions)
+        total_hours = sum(p.get("cocomo", {}).get("effort_hours", 0) for p in predictions)
+        total_pm = sum(p.get("cocomo", {}).get("effort_person_months", 0) for p in predictions)
 
-        estimated_debug_hours = round(base_hours * risk_multiplier, 1)
-        estimated_cost = round(estimated_debug_hours * 75, 0)  # $75/hr dev rate
+        # Aggregate breakdown
+        dev = sum(p.get("cocomo", {}).get("breakdown", {}).get("development", 0) for p in predictions)
+        test = sum(p.get("cocomo", {}).get("breakdown", {}).get("testing", 0) for p in predictions)
+        review = sum(p.get("cocomo", {}).get("breakdown", {}).get("code_review", 0) for p in predictions)
+        deploy = sum(p.get("cocomo", {}).get("breakdown", {}).get("deployment", 0) for p in predictions)
+        overhead = sum(p.get("cocomo", {}).get("breakdown", {}).get("overhead", 0) for p in predictions)
 
         return {
-            "estimated_debug_hours_90d": estimated_debug_hours,
-            "estimated_cost_90d": estimated_cost,
-            "confidence": "medium" if decay_rate > 2 else "low",
+            "model": "COCOMO II (Semi-Detached)",
+            "dev_rate_per_hour": self.DEV_HOURLY_RATE,
+            "total_cost": round(total_cost, 0),
+            "total_effort_hours": round(total_hours, 1),
+            "total_effort_person_months": round(total_pm, 2),
+            "breakdown": {
+                "development": round(dev, 0),
+                "testing": round(test, 0),
+                "code_review": round(review, 0),
+                "deployment": round(deploy, 0),
+                "overhead_management": round(overhead, 0),
+            },
         }
 
     def _generate_recommendation(
