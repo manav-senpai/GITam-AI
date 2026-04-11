@@ -1,0 +1,45 @@
+GITam AI Tech Stack
+
+Frontend
+- React 19
+- Vite
+- React Router
+- React Markdown
+- Plain CSS
+- JavaScript with ES modules
+
+Backend
+- Python 3.10+
+- FastAPI
+- Uvicorn
+- Pydantic 2
+- python-dotenv
+- httpx
+- OpenAI Python client
+- ReportLab
+
+AI and Analysis Services
+- Groq API as the primary LLM provider
+- Ollama as the local fallback LLM provider
+- GitHub API for repository data collection
+
+Product Capabilities
+- Repository analysis and hotspot detection
+- Code health scoring
+- Bug analysis and failure prediction
+- Executive report generation
+- Email delivery through SMTP
+- Chatbot for repository Q&A
+
+Development Tooling
+- npm
+- ESLint
+- Vite dev server
+
+Runtime Requirements
+- Node.js 18+
+- npm
+- GitHub token for higher API limits
+- Groq API key
+- Optional Ollama instance
+- Optional SMTP credentials
