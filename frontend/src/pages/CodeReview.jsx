@@ -80,6 +80,16 @@ export default function CodeReview({ data, apiBase }) {
         })
     }
 
+    const renderRiskTag = (tag) => {
+        const tags = {
+            'high-churn': '🔥 High churn',
+            'single-maintainer': '🧍 Single maintainer risk',
+            'low-test-coverage': '🧪 No test coverage signal',
+            'bug-prone': '🐛 Bug-prone',
+        }
+        return tags[tag] || tag
+    }
+
     return (
         <div className="page">
             <div className="page-header">
@@ -145,6 +155,56 @@ export default function CodeReview({ data, apiBase }) {
                                 </div>
                             </div>
 
+                            {reviewData.file_metrics && (
+                                <div className="card">
+                                    <div className="card-header">
+                                        <h3 className="card-title">📐 Engineering Intelligence Metrics</h3>
+                                    </div>
+                                    <div className="grid-2" style={{ gap: '12px' }}>
+                                        <div style={{ padding: '14px', background: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Churn Rate</div>
+                                            <div style={{ fontSize: '20px', fontWeight: '700' }}>{reviewData.file_metrics.churn_rate || 0}%</div>
+                                        </div>
+                                        <div style={{ padding: '14px', background: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Contributor Count</div>
+                                            <div style={{ fontSize: '20px', fontWeight: '700' }}>{reviewData.file_metrics.contributor_count || 0}</div>
+                                        </div>
+                                        <div style={{ padding: '14px', background: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Bug History (commits)</div>
+                                            <div style={{ fontSize: '20px', fontWeight: '700' }}>{reviewData.file_metrics.bug_history_count || 0}</div>
+                                        </div>
+                                        <div style={{ padding: '14px', background: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Test Coverage Signal</div>
+                                            <div style={{ fontSize: '20px', fontWeight: '700', color: reviewData.file_metrics.has_test_signal ? 'var(--color-healthy)' : 'var(--color-critical)' }}>
+                                                {reviewData.file_metrics.has_test_signal ? 'Present' : 'Missing'}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+                                        {(reviewData.file_metrics.risk_tags || []).map((tag) => (
+                                            <span key={tag} className="card-badge badge-warning" style={{ fontSize: '11px' }}>
+                                                {renderRiskTag(tag)}
+                                            </span>
+                                        ))}
+                                    </div>
+
+                                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {(reviewData.file_metrics.risk_drivers || []).map((driver) => (
+                                            <div key={driver.driver} className="risk-driver-card">
+                                                <strong style={{ fontSize: '12px' }}>{driver.driver}</strong>
+                                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+                                                    +{Math.round(driver.impact || 0)} risk
+                                                </span>
+                                                <p style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                                    {driver.evidence}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* AI Review Panel */}
                             <div className="ai-review-panel">
                                 <h3>🤖 AI Code Review</h3>
@@ -161,13 +221,13 @@ export default function CodeReview({ data, apiBase }) {
                             {reviewData.diffs?.map((diff, i) => (
                                 <div key={i} className="diff-viewer">
                                     <div className="diff-header">
-                                        <div>
+                                        <div style={{ minWidth: 0, overflow: 'hidden' }}>
                                             <strong>Commit {diff.sha}</strong>
-                                            <span style={{ marginLeft: '12px', color: 'var(--text-muted)' }}>
+                                            <span style={{ marginLeft: '12px', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
                                                 {diff.message}
                                             </span>
                                         </div>
-                                        <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
+                                        <div style={{ display: 'flex', gap: '12px', fontSize: '12px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                                             <span>by {diff.author}</span>
                                             <span>{diff.date?.slice(0, 10)}</span>
                                             <span style={{ color: 'var(--color-healthy)' }}>+{diff.additions}</span>

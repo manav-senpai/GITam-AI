@@ -17,6 +17,7 @@ class CodeAnalyzerAgent:
         self.file_authors = defaultdict(set)
         self.file_last_modified = {}
         self.hotspot_files = []
+        self.all_changed_files = set()
 
     def analyze_commits(self, commits: list, detailed_commits: list) -> dict:
         """Analyze commit history to find code churn and hotspots."""
@@ -32,6 +33,7 @@ class CodeAnalyzerAgent:
             author = dc.get("author", "unknown")
             for f in dc.get("files", []):
                 filename = f["filename"]
+                self.all_changed_files.add(filename)
                 self.file_churn[filename] += 1
                 self.file_additions[filename] += f.get("additions", 0)
                 self.file_deletions[filename] += f.get("deletions", 0)
@@ -44,19 +46,25 @@ class CodeAnalyzerAgent:
         # Calculate churn rate per file
         file_analysis = []
         for filename, change_count in self.hotspot_files:
+            related_tests = self._find_related_tests(filename)
+            unique_authors = len(self.file_authors[filename])
             file_analysis.append({
                 "filename": filename,
                 "change_count": change_count,
                 "additions": self.file_additions[filename],
                 "deletions": self.file_deletions[filename],
-                "unique_authors": len(self.file_authors[filename]),
+                "unique_authors": unique_authors,
                 "authors": list(self.file_authors[filename]),
                 "last_modified": self.file_last_modified.get(filename),
+                "commit_churn_rate": round((change_count / max(len(commits), 1)) * 100, 1),
+                "test_related_files": related_tests,
+                "has_test_signal": len(related_tests) > 0 or self._is_test_file(filename),
+                "single_maintainer_risk": unique_authors <= 1,
                 "churn_score": self._calculate_churn_score(
                     change_count,
                     self.file_additions[filename],
                     self.file_deletions[filename],
-                    len(self.file_authors[filename]),
+                    unique_authors,
                 ),
             })
 
@@ -82,6 +90,35 @@ class CodeAnalyzerAgent:
         )
 
         return min(round(change_weight + size_weight + author_weight + delete_ratio, 1), 100)
+
+    def _is_test_file(self, filename: str) -> bool:
+        lower = filename.lower()
+        return (
+            "/test" in lower
+            or "tests/" in lower
+            or lower.endswith("_test.py")
+            or lower.endswith(".test.js")
+            or lower.endswith(".spec.js")
+            or lower.endswith(".test.ts")
+            or lower.endswith(".spec.ts")
+            or lower.endswith(".test.jsx")
+            or lower.endswith(".test.tsx")
+        )
+
+    def _find_related_tests(self, filename: str) -> list:
+        """Find test files that likely cover this file from changed-file history."""
+        file_lower = filename.lower()
+        base_name = file_lower.split("/")[-1].split(".")[0]
+        related = []
+
+        for candidate in self.all_changed_files:
+            cand_lower = candidate.lower()
+            if not self._is_test_file(cand_lower):
+                continue
+            if base_name and base_name in cand_lower:
+                related.append(candidate)
+
+        return sorted(set(related))[:5]
 
     def _calculate_commit_frequency(self, commits: list) -> dict:
         """Calculate commit frequency trends."""

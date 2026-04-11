@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import CodeReview from './pages/CodeReview'
 import Report from './pages/Report'
 import Home from './pages/Home'
+import About from './pages/About'
 import Chatbot from './components/Chatbot'
 import './index.css'
 
@@ -15,6 +16,13 @@ function App() {
   const [analyzing, setAnalyzing] = useState(false)
   const [progress, setProgress] = useState(null)
   const [theme, setTheme] = useState(() => localStorage.getItem('gitam-theme') || 'light')
+  const [costConfig, setCostConfig] = useState({
+    mode: 'hour',
+    costPerHour: 85,
+    costPerKloc: 2800,
+    appliedCost: null,
+    explanation: '',
+  })
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -104,6 +112,32 @@ function App() {
     { name: 'Report Generator', desc: 'Writing CEO report...' },
   ]
 
+  const applyCostConfig = ({ mode, costPerHour, costPerKloc }) => {
+    if (!analysisData) return
+
+    const riskHours = Number(analysisData.report?.metrics?.total_risk_hours || 0)
+    const affectedLoc = (analysisData.code_analysis?.hotspot_files || []).reduce(
+      (sum, f) => sum + Number(f.additions || 0) + Number(f.deletions || 0),
+      0
+    )
+
+    const calculatedCost = mode === 'hour'
+      ? riskHours * Number(costPerHour || 0)
+      : (affectedLoc / 1000) * Number(costPerKloc || 0)
+
+    const explanation = mode === 'hour'
+      ? `Total Cost = ${riskHours.toFixed(1)} risk hours × $${Number(costPerHour || 0).toLocaleString()}/hour.`
+      : `Total Cost = (${affectedLoc.toLocaleString()} LOC / 1000) × $${Number(costPerKloc || 0).toLocaleString()}/KLOC.`
+
+    setCostConfig({
+      mode,
+      costPerHour: Number(costPerHour || 0),
+      costPerKloc: Number(costPerKloc || 0),
+      appliedCost: Math.round(calculatedCost),
+      explanation,
+    })
+  }
+
   return (
     <Router>
       {analyzing && progress && (
@@ -160,6 +194,9 @@ function App() {
                 </NavLink>
               </>
             )}
+            <NavLink to="/about" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              ℹ️ About
+            </NavLink>
           </div>
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
             {theme === 'light' ? '🌙' : '☀️'}
@@ -169,9 +206,10 @@ function App() {
 
       <Routes>
         <Route path="/" element={<Home onAnalyze={startAnalysis} analysisData={analysisData} />} />
-        <Route path="/dashboard" element={<Dashboard data={analysisData} />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/dashboard" element={<Dashboard data={analysisData} costConfig={costConfig} />} />
         <Route path="/code-review" element={<CodeReview data={analysisData} apiBase={API_BASE} />} />
-        <Route path="/report" element={<Report data={analysisData} apiBase={API_BASE} />} />
+        <Route path="/report" element={<Report data={analysisData} apiBase={API_BASE} costConfig={costConfig} onApplyCost={applyCostConfig} />} />
       </Routes>
 
       {/* Chatbot - only shows when analysis is done */}

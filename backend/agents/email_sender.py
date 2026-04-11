@@ -3,11 +3,15 @@ Email Sender Agent - Sends CEO reports via email using SMTP.
 """
 
 import os
+import io
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from dotenv import load_dotenv
 import re
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
 load_dotenv()
 
@@ -55,6 +59,52 @@ class EmailSenderAgent:
         </div>
         """
 
+    def _markdown_to_plain_lines(self, markdown_text: str) -> list:
+        """Convert markdown-ish text into readable plain lines for PDF export."""
+        cleaned = markdown_text.replace("**", "")
+        cleaned = re.sub(r'^#+\s*', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^-\s*', '• ', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^\*\s*', '• ', cleaned, flags=re.MULTILINE)
+        return cleaned.splitlines()
+
+    def _build_pdf_attachment(self, report_markdown: str, repo_name: str) -> bytes:
+        """Generate a simple PDF version of report for email attachment."""
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=letter)
+        width, height = letter
+
+        y = height - 48
+        left_margin = 48
+        max_chars = 105
+
+        pdf.setFont("Helvetica-Bold", 14)
+        pdf.drawString(left_margin, y, f"Engineering Health Report - {repo_name}")
+        y -= 24
+
+        pdf.setFont("Helvetica", 10)
+        for raw_line in self._markdown_to_plain_lines(report_markdown):
+            line = raw_line.strip()
+            if line == "":
+                y -= 8
+                if y < 48:
+                    pdf.showPage()
+                    pdf.setFont("Helvetica", 10)
+                    y = height - 48
+                continue
+
+            chunks = [line[i:i + max_chars] for i in range(0, len(line), max_chars)]
+            for chunk in chunks:
+                pdf.drawString(left_margin, y, chunk)
+                y -= 14
+                if y < 48:
+                    pdf.showPage()
+                    pdf.setFont("Helvetica", 10)
+                    y = height - 48
+
+        pdf.save()
+        buffer.seek(0)
+        return buffer.read()
+
     def send_report(self, to_email: str, report_markdown: str, repo_name: str) -> dict:
         """Send the CEO report via email."""
         print(f"[EmailSender] Sending report to {to_email}...")
@@ -66,19 +116,33 @@ class EmailSenderAgent:
             }
 
         try:
-            msg = MIMEMultipart("alternative")
+            msg = MIMEMultipart("mixed")
             msg["Subject"] = f"🔍 Engineering Health Report: {repo_name}"
             msg["From"] = self.sender_email
             msg["To"] = to_email
 
+            alt = MIMEMultipart("alternative")
+
             # Plain text version
             text_part = MIMEText(report_markdown, "plain")
-            msg.attach(text_part)
+            alt.attach(text_part)
 
             # HTML version
             html_content = self._markdown_to_html(report_markdown)
             html_part = MIMEText(html_content, "html")
-            msg.attach(html_part)
+            alt.attach(html_part)
+
+            msg.attach(alt)
+
+            # PDF attachment
+            pdf_bytes = self._build_pdf_attachment(report_markdown, repo_name)
+            pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+            pdf_part.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=f"{repo_name.replace('/', '_')}_engineering_report.pdf",
+            )
+            msg.attach(pdf_part)
 
             # Send
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:

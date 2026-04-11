@@ -53,6 +53,7 @@ class CodeReviewRequest(BaseModel):
 class EmailRequest(BaseModel):
     to_email: str
     repo_url: str
+    report_text: Optional[str] = None
 
 
 # ── Helper ──
@@ -176,8 +177,12 @@ async def get_dashboard(owner: str, repo: str):
             "commit_frequency": data["code_analysis"]["commit_frequency"],
         },
         "bug_analysis": {
+            "total_issues": data["bug_analysis"].get("total_issues", 0),
             "total_bugs": data["bug_analysis"]["total_bugs"],
             "open_bugs": data["bug_analysis"]["open_bugs"],
+            "bug_signal_source": data["bug_analysis"].get("bug_signal_source", "issues"),
+            "estimated_from_commits": data["bug_analysis"].get("estimated_from_commits", False),
+            "commit_bug_signals": data["bug_analysis"].get("commit_bug_signals", 0),
             "severity": data["bug_analysis"]["severity"],
             "monthly_trend": data["bug_analysis"]["monthly_trend"],
             "avg_resolution_days": data["bug_analysis"]["avg_resolution_days"],
@@ -209,11 +214,33 @@ async def get_code_review(owner: str, repo: str, req: CodeReviewRequest):
     # Get AI review
     ai_review = await code_analyzer.ai_review_file(req.filename, file_content, diffs)
 
+    selected_file_score = None
+    for fs in data.get("health_scores", {}).get("file_scores", []):
+        if fs.get("filename") == req.filename:
+            selected_file_score = fs
+            break
+
+    bug_keywords = ["fix", "bug", "patch", "error", "crash", "issue", "regression"]
+    bug_related_change_count = sum(
+        1 for d in diffs if any(kw in (d.get("message", "").lower()) for kw in bug_keywords)
+    )
+
+    file_metrics = {
+        "churn_rate": selected_file_score.get("commit_churn_rate", 0) if selected_file_score else 0,
+        "contributor_count": selected_file_score.get("unique_authors", 0) if selected_file_score else 0,
+        "bug_history_count": bug_related_change_count,
+        "has_test_signal": selected_file_score.get("has_test_signal", False) if selected_file_score else False,
+        "risk_tags": selected_file_score.get("risk_tags", []) if selected_file_score else [],
+        "risk_drivers": selected_file_score.get("risk_drivers", []) if selected_file_score else [],
+        "health_score": selected_file_score.get("health_score") if selected_file_score else None,
+    }
+
     return {
         "filename": req.filename,
         "current_content": file_content[:10000],
         "diffs": diffs,
         "ai_review": ai_review,
+        "file_metrics": file_metrics,
     }
 
 
@@ -240,9 +267,10 @@ async def send_email(req: EmailRequest):
         raise HTTPException(status_code=404, detail="Repository not analyzed yet.")
 
     report = analysis_store[repo_key]["report"]
+    report_text = req.report_text if req.report_text else report["report_text"]
     email_sender = EmailSenderAgent()
     result = email_sender.send_report(
-        req.to_email, report["report_text"], repo_key
+        req.to_email, report_text, repo_key
     )
 
     if not result["success"]:

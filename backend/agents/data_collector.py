@@ -120,6 +120,23 @@ class DataCollectorAgent:
                     title_lower = issue.get("title", "").lower()
                     body_lower = (issue.get("body") or "").lower()
                     text_combined = title_lower + " " + body_lower + " " + " ".join(labels).lower()
+
+                    bug_label_terms = {
+                        "bug", "type: bug", "type/bug", "kind/bug", "defect", "regression", "incident", "crash"
+                    }
+                    non_bug_terms = {
+                        "feature", "enhancement", "question", "discussion", "proposal", "documentation"
+                    }
+                    strong_bug_terms = {
+                        "bug", "defect", "regression", "crash", "exception", "traceback",
+                        "broken", "fails", "failing", "not working", "doesn't work", "error"
+                    }
+
+                    label_set = {x.strip().lower() for x in labels}
+                    has_bug_label = any(term in label_set for term in bug_label_terms)
+                    has_non_bug_label = any(term in label_set for term in non_bug_terms)
+                    has_strong_bug_signal = any(term in text_combined for term in strong_bug_terms)
+
                     all_issues.append({
                         "number": issue["number"],
                         "title": issue["title"],
@@ -128,12 +145,7 @@ class DataCollectorAgent:
                         "created_at": issue["created_at"],
                         "closed_at": issue.get("closed_at"),
                         "body": (issue.get("body") or "")[:500],
-                        "is_bug": any(
-                            kw in text_combined
-                            for kw in ["bug", "defect", "error", "fix", "crash", "broken",
-                                        "fail", "issue", "wrong", "not work", "doesn't work",
-                                        "regression", "unexpected", "fault", "problem"]
-                        ),
+                        "is_bug": bool((has_bug_label or has_strong_bug_signal) and not has_non_bug_label),
                     })
                 if len(issues) < per_page:
                     break

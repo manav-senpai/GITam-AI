@@ -5,13 +5,11 @@ Uses COCOMO II model for cost estimation + decay rate trend analysis.
 
 import math
 from datetime import datetime
-from collections import defaultdict
 
 
 class PredictorAgent:
     """Agent that predicts future component failures based on trends."""
 
-    # COCOMO II coefficients (Semi-Detached mode — typical for most projects)
     COCOMO_A = 3.0        # Effort multiplier
     COCOMO_B = 1.12       # Scale exponent
     COCOMO_C = 2.5        # Schedule multiplier
@@ -44,6 +42,8 @@ class PredictorAgent:
         # Aggregate COCOMO cost breakdown
         cocomo_breakdown = self._aggregate_cocomo(predictions)
 
+        failure_simulation = self._simulate_failures(predictions, code_analysis)
+
         return {
             "predictions": predictions,
             "summary": {
@@ -55,6 +55,7 @@ class PredictorAgent:
             },
             "timeline": self._generate_timeline(predictions),
             "cocomo_breakdown": cocomo_breakdown,
+            "failure_simulation": failure_simulation,
         }
 
     def _estimate_kloc(self, file_score: dict) -> float:
@@ -122,6 +123,9 @@ class PredictorAgent:
         current_health = file_score["health_score"]
         churn = file_score["churn_score"]
         risk_factors = file_score.get("risk_factors", [])
+        risk_drivers = file_score.get("risk_drivers", [])
+
+        driver_impact = sum(d.get("impact", 0) for d in risk_drivers)
 
         # Calculate decay rate based on current metrics
         decay_rate = 0
@@ -137,9 +141,18 @@ class PredictorAgent:
         # Many risk factors accelerate decay
         decay_rate += len(risk_factors) * 0.5
 
+        # Risk drivers create measurable confidence in trend direction
+        decay_rate += min(3.0, driver_impact / 25.0)
+
         # Files with many authors have ownership issues
         if file_score.get("unique_authors", 0) > 3:
             decay_rate += 1
+
+        if file_score.get("unique_authors", 0) <= 1:
+            decay_rate += 1.2
+
+        if not file_score.get("has_test_signal", True):
+            decay_rate += 1.0
 
         # Predict future scores
         score_30d = max(0, current_health - (decay_rate * 3))
@@ -171,12 +184,17 @@ class PredictorAgent:
             "predicted_health_30d": round(score_30d, 1),
             "predicted_health_60d": round(score_60d, 1),
             "predicted_health_90d": round(score_90d, 1),
+            "risk_score_30d": round(100 - score_30d, 1),
+            "risk_score_60d": round(100 - score_60d, 1),
             "risk_score_90d": round(100 - score_90d, 1),
+            "risk_delta_30_to_90": round((100 - score_90d) - (100 - score_30d), 1),
             "risk_level_30d": risk_30d,
             "risk_level_60d": risk_60d,
             "risk_level_90d": risk_90d,
             "decay_rate": round(decay_rate, 2),
             "risk_factors": risk_factors,
+            "risk_drivers": risk_drivers,
+            "explanation": self._build_explanation(file_score["filename"], risk_drivers, risk_30d, risk_90d),
             "estimated_impact": {
                 "estimated_debug_hours_90d": cocomo["effort_hours"],
                 "estimated_cost_90d": cocomo["total_cost"],
@@ -248,3 +266,142 @@ class PredictorAgent:
                 "low_risk": low,
             })
         return timeline
+
+    def _build_explanation(self, filename: str, drivers: list, risk_30d: str, risk_90d: str) -> str:
+        if not drivers:
+            return f"{filename} is currently stable with limited risk signals in recent engineering activity."
+
+        top = sorted(drivers, key=lambda d: d.get("impact", 0), reverse=True)[:3]
+        why = ", ".join(d.get("driver", "Unknown driver") for d in top)
+        return (
+            f"Risk trend for {filename} moves from {risk_30d} in 30d to {risk_90d} in 90d "
+            f"mainly due to: {why}."
+        )
+
+    def _simulate_failures(self, predictions: list, code_analysis: dict) -> dict:
+        """Simulate blast radius for top risky components (wow feature)."""
+        hotspot_meta = {
+            f.get("filename"): f
+            for f in code_analysis.get("hotspot_files", [])
+            if f.get("filename")
+        }
+        hotspot_files = list(hotspot_meta.keys())
+        simulation_items = []
+
+        ranked_predictions = sorted(
+            predictions,
+            key=lambda p: (
+                self._component_priority(p.get("filename", "")),
+                p.get("risk_score_90d", 0),
+            ),
+            reverse=True,
+        )
+
+        for p in ranked_predictions[:5]:
+            filename = p.get("filename", "")
+            top_dir = filename.split("/")[0] if "/" in filename else "root"
+
+            candidates = [f for f in hotspot_files if f != filename]
+            candidates = sorted(
+                candidates,
+                key=lambda f: (
+                    self._shared_subsystem_score(filename, f, top_dir),
+                    self._component_priority(f),
+                ),
+                reverse=True,
+            )
+
+            impacted = [
+                f for f in candidates
+                if self._component_priority(f) >= 0
+            ][:5]
+
+            if not impacted:
+                impacted = candidates[:3]
+
+            risk_90 = p.get("risk_score_90d", 0)
+            trigger_priority = self._component_priority(filename)
+            impact_priority = sum(max(0, self._component_priority(f)) for f in impacted)
+
+            estimated_downtime = round(
+                1.2
+                + (risk_90 / 20.0)
+                + (len(impacted) * 0.85)
+                + max(0, trigger_priority * 0.7)
+                + (impact_priority * 0.2),
+                1,
+            )
+            cascading = max(1, int(round(len(impacted) * 1.2)))
+
+            trigger_info = hotspot_meta.get(filename, {})
+
+            simulation_items.append({
+                "trigger_file": filename,
+                "risk_level": p.get("risk_level_90d"),
+                "trigger_type": self._component_type(filename),
+                "impacted_modules": impacted,
+                "estimated_downtime_hours": estimated_downtime,
+                "cascading_failures": cascading,
+                "blast_radius": "high" if len(impacted) >= 4 else "medium" if len(impacted) >= 2 else "low",
+                "reason": self._simulation_reason(filename, trigger_info, impacted),
+            })
+
+        portfolio_downtime = round(sum(item["estimated_downtime_hours"] for item in simulation_items), 1)
+        return {
+            "scenarios": simulation_items,
+            "portfolio_estimated_downtime_hours": portfolio_downtime,
+            "summary": "Simulation is prioritized toward runtime-critical modules; CI/config files are down-weighted for realistic production impact.",
+        }
+
+    def _component_priority(self, filename: str) -> int:
+        """Higher score means more production-impactful component."""
+        f = filename.lower()
+        score = 0
+
+        if any(seg in f for seg in ["src/", "backend/", "app/", "core/", "service", "api/"]):
+            score += 4
+        if any(seg in f for seg in [".github/", "workflow", "docs/", "readme", "changelog", "example"]):
+            score -= 4
+        if any(seg in f for seg in ["test", "spec", "fixtures/"]):
+            score -= 2
+        if any(seg in f for seg in ["lock", "package-lock", "yarn.lock", "pnpm-lock", ".env", "docker-compose"]):
+            score -= 3
+
+        if f.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rb", ".php", ".cs")):
+            score += 2
+        if f.endswith((".yaml", ".yml", ".toml", ".json", ".md")):
+            score -= 1
+
+        return score
+
+    def _component_type(self, filename: str) -> str:
+        f = filename.lower()
+        if self._component_priority(filename) >= 4:
+            return "runtime-core"
+        if any(seg in f for seg in [".github/", "workflow", "ci", "pipeline"]):
+            return "ci-config"
+        if any(seg in f for seg in ["test", "spec"]):
+            return "test-suite"
+        return "supporting"
+
+    def _shared_subsystem_score(self, root: str, candidate: str, top_dir: str) -> int:
+        score = 0
+        root_base = root.split("/")[-1].split(".")[0]
+        cand_base = candidate.split("/")[-1]
+
+        if candidate.startswith(top_dir + "/"):
+            score += 4
+        if root_base and root_base in candidate.lower():
+            score += 2
+        if cand_base.split(".")[0] == root_base:
+            score += 2
+        return score
+
+    def _simulation_reason(self, trigger: str, trigger_info: dict, impacted: list) -> str:
+        change_count = trigger_info.get("change_count", 0)
+        additions = trigger_info.get("additions", 0)
+        deletions = trigger_info.get("deletions", 0)
+        return (
+            f"{trigger} is a high-volatility hotspot ({change_count} changes, +{additions}/-{deletions}) "
+            f"with dependency adjacency to {len(impacted)} nearby modules."
+        )
